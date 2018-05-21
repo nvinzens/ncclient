@@ -26,7 +26,6 @@ logger = logging.getLogger(__name__)
 
 
 class CreateSubscription(RPC):
-    
     "`create-subscription` RPC. Depends on the `:notification` capability."
 
     DEPENDS = [':notification']
@@ -84,7 +83,6 @@ period_template = '''<?xml version="1.0" encoding="UTF-8"?>
  </establish-subscription>
 </rpc>'''
 
-
 #
 # Message with dampening-period specified
 #
@@ -100,9 +98,8 @@ dampening_period_template = '''<?xml version="1.0" encoding="UTF-8"?>
 
 
 class EstablishSubscriptionReply(RPCReply):
-
     """Establish Subscription Result RPCReply Class."""
-    
+
     def _parsing_hook(self, root):
         self._result = None
         self._subscription_id = None
@@ -119,7 +116,7 @@ class EstablishSubscriptionReply(RPCReply):
                 self._message_id, int(self._subscription_id.text))
         else:
             original_rpc.session.yang_push_listener.remove_subscription_listener(
-                        self._message_id)
+                self._message_id)
 
     @property
     def subscription_result(self):
@@ -168,13 +165,12 @@ class EstablishSubscriptionReply(RPCReply):
 
 
 class EstablishSubscription(RPC):
-    
     "`establish-subscription` RPC"
 
     # DEPENDS = [':ietf-yang-push']
     REPLY_CLS = EstablishSubscriptionReply
-    
-    def request(self, callback, errback, xpath=None, period=None, dampening_period=None):
+
+    def request(self, callback, errback, xpath=None, period=None, dampening_period=None, topic=None, host=None):
         """Create a simple subscription for ietf-yang-push subscriptions.
 
         *callback* user-defined callback for notifications
@@ -228,16 +224,15 @@ class EstablishSubscription(RPC):
 
         # add the callbacks against the message id for now; will patch
         # that up in the reply
-        self.session.yang_push_listener.add_subscription_listener(self._id, callback, errback)
-            
+        self.session.yang_push_listener.add_subscription_listener(self._id, callback, errback, topic=topic, host=host)
+
         # Now process the request
         return self._request(None, raw_xml=rpc)
 
 
 class DeleteSubscriptionReply(RPCReply):
-
     """Delete Subscription Result RPCReply Class."""
-    
+
     def _parsing_hook(self, root):
         self._result = None
         self._subscription_id = None
@@ -268,12 +263,11 @@ class DeleteSubscriptionReply(RPCReply):
 
 
 class DeleteSubscription(RPC):
-    
     "`establish-subscription` RPC"
 
     # DEPENDS = [':ietf-yang-push']
     REPLY_CLS = DeleteSubscriptionReply
-    
+
     def request(self, subscription_id=None):
         """Create a simple subscription for ietf-yang-push subscriptions.
 
@@ -295,15 +289,14 @@ class DeleteSubscription(RPC):
 
         # remove subscription-id callbacks
         self.session.yang_push_listener.remove_subscription_listener(int(subscription_id))
-        
+
         # Now process the request
         return self._request(node)
 
 
 class YangPushNotificationType(object):
-
     """Simple enumeration of YANG push notification types."""
-    
+
     UNKNOWN = 0
     PUSH_UPDATE = 1
     PUSH_CHANGE_UPDATE = 2
@@ -321,9 +314,8 @@ class YangPushNotificationType(object):
 
 
 class YangPushNotification(object):
-
     """Represents a YANG Push `notification`."""
-    
+
     def __init__(self, raw):
         self._raw = raw
         self._parsed = False
@@ -333,10 +325,10 @@ class YangPushNotification(object):
         self._subscription_id = None
         self._type = None
         self._invalid = False
-        
+
     def __repr__(self):
         return self._raw
-    
+
     def parse(self):
         try:
             root = self._root = to_ele(self._raw)
@@ -372,7 +364,7 @@ class YangPushNotification(object):
 
         except Exception as e:
             self._invalid = True
-            
+
     @property
     def xml(self):
         return self._raw
@@ -421,7 +413,6 @@ class YangPushNotification(object):
 
 
 class YangPushListener(SessionListener):
-
     """Class extending :class:`Session` listeners, which are notified when
     a new RFC 5277 notification is received or an error occurs. Only a
     single instance of this class should be added to the listeners
@@ -429,26 +420,27 @@ class YangPushListener(SessionListener):
     the single listener.
 
     """
+
     def __init__(self):
         """Called by EstablishSubscription when a new NotificationListener is
         added to a session.  used to keep track of connection and
         subscription info in case connection gets dropped.
         """
         self.subscription_listeners = {}
+        self.topic = None
+        self.host = None
 
-        
-    def add_subscription_listener(self, id, user_callback, user_errback):
+    def add_subscription_listener(self, id, user_callback, user_errback, topic=None, host=None):
         self.subscription_listeners[id] = (user_callback, user_errback)
+        self.topic = topic
+        self.host = host
 
-        
     def rekey_subscription_listener(self, old_id, new_id):
         self.subscription_listeners[new_id] = self.subscription_listeners.pop(old_id)
 
-        
     def remove_subscription_listener(self, id):
         self.subscription_listeners.pop(id)
 
-        
     def callback(self, root, raw):
         """Called when a new RFC 5277 notification is received.
 
@@ -467,10 +459,9 @@ class YangPushListener(SessionListener):
         notif = YangPushNotification(raw)
         try:
             user_callback, _ = self.subscription_listeners[notif.subscription_id]
-            user_callback(notif)
+            user_callback(notif, self.topic, self.host)
         except:
             logger.error("No callback for subscription_id=%d" % notif.subscription_id)
-
 
     def errback(self, ex):
         """Called when an error occurs. For now just handles a dropped connection.
